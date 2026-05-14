@@ -130,7 +130,8 @@ class Treasury_Data:
 
             if date_found:
                 break
-        self.anchor_rates = results
+
+        self.anchor_rates = list(next(iter(results.values())).values())
         #Update shape of maturity labels and floats
         present_rates = set(next(iter(results.values()))) if results else set()
         self.maturity_labels = []
