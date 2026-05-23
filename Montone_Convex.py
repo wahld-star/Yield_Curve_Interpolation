@@ -2,52 +2,50 @@ from ust_xml_pull import Treasury_Data
 import numpy as np
 import matplotlib.pyplot as plt
 from functools import cached_property
-
+from bisect import bisect_right
 
 class Montone_Convex:
     def __init__(self, t_data):
         self.maturity_map = t_data.maturity_map
         self.maturity_labels = t_data.maturity_labels #replacing maturities
         self.maturity_floats = t_data.maturity_floats #replacing maturity_numerical
-        self.anchor_rts = t_data.anchor_rates #Anchor Rates
+        self.input_rates = t_data.input_rates #Anchor Rates
 
     #Create discrete fwd arb-free rates
     @cached_property
     def discrete_fwd(self):
         disc_fwd = {}
-        anchor_rts = self.anchor_rts
+        anchor_rts = self.input_rates
         period = self.maturity_floats
-        for n, rate in enumerate(anchor_rts[:-1]):
-            disc_fwd[period[n]] = (anchor_rts[n + 1] * period[n+1] - anchor_rts[n] * period[n]) / (period[n + 1] - period[n])
+        #add first interval f_d1 = r_1
+        disc_fwd[period[0]] = anchor_rts[0]
+        for n in range(1, len(anchor_rts)):
+            disc_fwd[period[n]] = (anchor_rts[n] * period[n] - anchor_rts[n-1] * period[n-1]) / (period[n] - period[n-1])
         return disc_fwd
 
     #make cc fwd rates equation 30 (Hagan West)
     @cached_property
     def continuous_fwd_midpoints(self):
         fwd_midpoints = {}
-        anchor_fwds = list(self.discrete_fwd.values())
-        period = self.maturity_floats
-        for n in range (1, len(period) - 1):
-            tau_prev = period[n-1]
-            tau_curr = period[n]
-            tau_next = period[n+1]
+        anchor_fwds = self.discrete_fwd
+        period = [0.0] + list(self.maturity_floats)
 
-            #set fwd bounds
-            left_bound = anchor_fwds[n-1]
-            right_bound = anchor_fwds[n]
+        for n in range(1, len(period) - 1):
+            t_prev, t_curr, t_next = period[n - 1], period[n], period[n + 1]
+            fd_left = anchor_fwds[t_curr]
+            fd_right = anchor_fwds[t_next]
+            wt_on_right = (t_curr - t_prev) / (t_next - t_prev)
+            wt_on_left = (t_next - t_curr) / (t_next - t_prev)
+            fwd_midpoints[t_curr] = wt_on_right * fd_right + wt_on_left * fd_left
 
-            #set interval weights
-            wt_left = (tau_curr - tau_prev) / (tau_next - tau_prev)
-            wt_right = (tau_next - tau_curr) / (tau_next - tau_prev)
-
-            fwd_midpoints[tau_curr] = wt_left * right_bound + wt_right * left_bound
         self.fwd_midpoints = fwd_midpoints
+        fwd_midpoints = list(fwd_midpoints.values())
         return fwd_midpoints
 
     @cached_property
     def boundary_conditions(self):
         disc_fwd = list(self.discrete_fwd.values())
-        fwd_midpoints = list(self.continuous_fwd_midpoints.values())
+        fwd_midpoints = self.continuous_fwd_midpoints
 
         #boundry for entire interpolation range not interval
         #Left boundry (start) f0 = f^d_1 - .5(f1-f^d_1) equation 31 (Hagan West) - if overnight rate is known, use instead of 31 b
@@ -57,64 +55,62 @@ class Montone_Convex:
 
         #Check f'(0) = 0 = f'(tau_n)
         self.boundary_conditions = [f0, fn]
-        return (f0, fn)
+        return f0, fn
 
-    #Find the midpoint for a given boundry
+    #Add boundry conditions to continuous_fwd_points
     @cached_property
     def f_midpoint(self):
-        period = self.maturity_floats
         f0, fn = self.boundary_conditions
-        #pairs the start value and end values into one dict and unpacks the mid-points in between (AI designed)
-        return {period[0]: f0,
-                **self.continuous_fwd_midpoints,
-                period[-1]: fn}
+        anchor_midpoints = self.continuous_fwd_midpoints
+        anchor_midpoints.insert(0, f0)
+        anchor_midpoints.append(fn)
+        return anchor_midpoints
 
-    def interpolate(self, tgt = None):
+    def instantaneous_fwd(self, tgt = None):
     #Define our quadratic as K + Lx(tau) _ Mx(tau)^2
     #interpolate at a single point (tau)
 
+        anchor_points = self.f_midpoint
         period = self.maturity_floats
-        f0, fn = self.boundary_conditions
-        # Find the period in which tau falls in
-        i = np.searchsorted(period, tgt , side='right')
-        i = min(max(i, 1), len(period) - 1)
 
-        tau_prev, tau_curr = period[i-1], period[i]
+        # Find the interval in which tau falls in
+        i = bisect_right(period, tgt)
 
-        f_disc = self.discrete_fwd[tau_prev]            #f^d on t_i-1, t_i
-        f_mid_left = self.discrete_fwd[tau_prev]        #f_i-1
-        f_mid_right = self.discrete_fwd[tau_curr]       #f_i
+        tau_prev = period[i-1]                                   #start of interval
+        tau_curr = period[i]                                     #end of interval
 
+        f_disc = list(self.discrete_fwd.values())[i]            #f^d on t_i-1, t_i
 
-        x_tau = (tgt - tau_prev) / (tau_curr - tau_prev)   #Normalized position in the curve
+        f_mid_left = anchor_points[i]                             #f_i-1
+        f_mid_right = anchor_points[i+1]                          #f_i
+
+        x_tau = (tgt-tau_prev) / (tau_curr - tau_prev)          #Normalized position in the curve
+
         # Hagan West equation 35
-        interpolated = f_mid_left * (1 -4 * x_tau + 3 * x_tau ** 2) + f_mid_right * (-2 * x_tau + 3*x_tau**2) + f_disc(6*x_tau - 6 * x_tau ** 2)
+        interpolated = f_mid_left * (1 -4 * x_tau + 3 * x_tau ** 2) + f_mid_right * (-2 * x_tau + 3*x_tau**2) + f_disc * (6*x_tau - 6 * x_tau ** 2)
         f_tau = interpolated
 
         #define g_tau for monotinicity calculations
-        g_tau = f_tau - f_disc                      #deviation of the continuous fwd curve from the discrete curve
+        g_tau = f_tau - f_disc                                     #deviation of the continuous fwd curve from the discrete curve
         g_left = f_mid_left - f_disc
-        g_right = f_mid_right - f_disc
-        g_vars = [g_tau, g_left, g_right]
+        g_vars = [g_tau, g_left]
 
         return f_tau, x_tau, g_vars
 
     def monotonicity(self):
-
         #Unpack vars
         f_tau, x_tau, g_vars = self.interpolate()
         g_tau = g_vars[0]
         g_left = g_vars[1]
-        g_right = g_vars[2]
-
-
 
         #Define our regions
         #Region I) g_i-1 > 0, -.5g_i-1 >= >= gi >= -2g_i-1 and g_i-1 < 0, .5g_i-1 <= g_i <= -2g-1
         if (g_left > 0 and .5 * g_left >= g_tau >= -2*g_left) or (g_left < 0 and .5 * g_left <= g_tau <= -2*g_left):
-            pass
+            region = 'I'
+            pass    #no change needed
         #Region II) g_i-1 < 0, -2g_i-1 and g_i-1 > 0, g_i < -2g_i-1
         elif (g_left < 0 and g_tau > -2 * g_left) or (g_left > 0 and g_tau < -2*g_left):
+            region = 'II'
             eta = (g_tau + 2*g_left)/(g_tau - g_left)                                       #Hagan West eq 50
             if 0 <= x_tau <= eta:
                 g_tau = g_left                                                              #Hagan West eq 49
@@ -122,13 +118,15 @@ class Montone_Convex:
                 g_tau = g_left + (g_tau - g_left) * ((x_tau - eta) / (1 - eta)) ** 2
         #Region III) g_i-1 > 0, 0 > g_i > .5g_i-1 and g_i-1 < 0, 0 < g_i < .5g_i-1
         elif (g_left > 0 and 0 > g_tau > .5 * g_left) or (g_left < 0 and 0 < g_tau < .5 * g_left):
+            region = 'III'
             eta = 3 * (g_tau / (g_tau - g_left))                                            #Hagan West eq 52
             if 0 < x_tau < eta:
                 g_tau = g_tau + (g_left - g_tau) * ((eta - x_tau) / eta) ** 2
-            if eta <= x_tau < 1
+            if eta <= x_tau < 1:
                 g_tau = g_tau
         #Region IV) g_i-1 >= 0, g_i >= 0 and g_i-1 <= 0, g_i <= 0
         elif (g_left >= 0 and g_tau >= 0) and (g_left <= 0 and g_tau <= 0):
+            region = 'IV'
             eta = g_tau / (g_tau + g_left)                                                  #Hagan West eq 55
             A = (g_left * g_tau)/(g_left + g_tau)                                           #Hagan West eq 56
             if 0 < x_tau < eta:
@@ -137,18 +135,24 @@ class Montone_Convex:
                 g_tau = A
             elif eta < x_tau < 1:
                 g_tau = A + (g_left - A) * ((x_tau - eta) / (1-eta)) ** 2
+        return region, g_tau
+
+    def positivity(self):
+        region, g_tau = self.monotonicity()
 
 def main():
     # date = input("Enter date (%M-%d-YYYY): ")
     # target = float(input('Select maturity period in years: '))
     date = "04-01-2026"
-    target = 6
+    target = .6
     data = Treasury_Data(date=date)
     test = Montone_Convex(data)
     # Trigger the computations
     test.discrete_fwd
     test.continuous_fwd_midpoints
     test.boundary_conditions
+    test.interpolate(target)
+    #test.monotonicity()
 
     import pprint
     pprint.pprint(vars(test))

@@ -36,7 +36,7 @@ class Treasury_Data:
         self.maturity_map = dict(self.Data_Key)
         self.maturity_labels = [n[0] for n in self.maturity_map.values()]
         self.maturity_floats = [n[1] for n in self.maturity_map.values()]
-        self.anchor_rates = {}
+        self.input_rates = {}
         self.fmt_load(self.date) #Loads format data before raw pull
         self.tdata_xml_pull() #pulls from treasury xml feed and fills rates data
 
@@ -131,7 +131,7 @@ class Treasury_Data:
             if date_found:
                 break
 
-        self.anchor_rates = list(next(iter(results.values())).values())
+        self.input_rates = list(next(iter(results.values())).values())
         #Update shape of maturity labels and floats
         present_rates = set(next(iter(results.values()))) if results else set()
         self.maturity_labels = []
