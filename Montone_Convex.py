@@ -66,11 +66,33 @@ class Montone_Convex:
         anchor_midpoints.append(fn)
         return anchor_midpoints
 
-    def instantaneous_fwd(self, tgt = None):
+    @cached_property
+    def positivity_bound(self):
+        f = list(self.f_midpoint)
+        fd = list(self.discrete_fwd.values())
+        n = len(fd)
+
+        #cap f0 by interval 1's average
+        f[0] = min(max(0.0, f[0]), 2*fd[0])                 #Hagan West eq 60
+
+        #interior f_i is bounded by the stricter of the two adjacent intervals
+        for i in range(1, n):
+            cap = 2*min(fd[i-1], fd[i])
+            f[i] = min(max(0.0, f[i]), cap)                 #Hagan West eq 61
+
+        #cap fn by last intervals average
+        f[n] = min(max(0.0, f[n]), 2 * fd[-1])
+        anchor_midpoints_bounded = f
+        return anchor_midpoints_bounded
+
+
+    def instantaneous_fwd(self, tgt = None, positivity = None):
     #Define our quadratic as K + Lx(tau) _ Mx(tau)^2
     #interpolate at a single point (tau)
-
-        anchor_points = self.f_midpoint
+        if positivity == 1:
+            anchor_points = self.positivity_bound
+        else:
+            anchor_points = self.f_midpoint
         period = self.maturity_floats
 
         # Find the interval in which tau falls in
@@ -93,7 +115,8 @@ class Montone_Convex:
         #define g_tau for monotinicity calculations
         g_tau = f_tau - f_disc                                     #deviation of the continuous fwd curve from the discrete curve
         g_left = f_mid_left - f_disc
-        g_vars = [g_tau, g_left]
+        g_right = f_mid_right - f_disc
+        g_vars = [g_tau, g_left, g_right]
 
         return f_tau, x_tau, g_vars
 
@@ -102,33 +125,35 @@ class Montone_Convex:
         f_tau, x_tau, g_vars = self.interpolate()
         g_tau = g_vars[0]
         g_left = g_vars[1]
+        g_right = g_vars[2]
 
         #Define our regions
         #Region I) g_i-1 > 0, -.5g_i-1 >= >= gi >= -2g_i-1 and g_i-1 < 0, .5g_i-1 <= g_i <= -2g-1
-        if (g_left > 0 and .5 * g_left >= g_tau >= -2*g_left) or (g_left < 0 and .5 * g_left <= g_tau <= -2*g_left):
+        if (g_left > 0 and .5 * g_left >= g_right >= -2*g_left) or (g_left < 0 and .5 * g_left <= g_right <= -2*g_left):
             region = 'I'
             pass    #no change needed
         #Region II) g_i-1 < 0, -2g_i-1 and g_i-1 > 0, g_i < -2g_i-1
-        elif (g_left < 0 and g_tau > -2 * g_left) or (g_left > 0 and g_tau < -2*g_left):
+        elif (g_left < 0 and g_right > -2 * g_left) or (g_left > 0 and g_right < -2*g_left):
             region = 'II'
-            eta = (g_tau + 2*g_left)/(g_tau - g_left)                                       #Hagan West eq 50
+            eta = (g_right + 2*g_left)/(g_right - g_left)                                       #Hagan West eq 50
             if 0 <= x_tau <= eta:
                 g_tau = g_left                                                              #Hagan West eq 49
             elif eta < x_tau <= 1:
-                g_tau = g_left + (g_tau - g_left) * ((x_tau - eta) / (1 - eta)) ** 2
+                g_tau = g_left + (g_right - g_left) * ((x_tau - eta) / (1 - eta)) ** 2
         #Region III) g_i-1 > 0, 0 > g_i > .5g_i-1 and g_i-1 < 0, 0 < g_i < .5g_i-1
-        elif (g_left > 0 and 0 > g_tau > .5 * g_left) or (g_left < 0 and 0 < g_tau < .5 * g_left):
+        elif (g_left > 0 and 0 > g_right > .5 * g_left) or (g_left < 0 and 0 < g_right < .5 * g_left):
             region = 'III'
-            eta = 3 * (g_tau / (g_tau - g_left))                                            #Hagan West eq 52
+            eta = 3 * (g_right / (g_right - g_left))                                            #Hagan West eq 52
             if 0 < x_tau < eta:
-                g_tau = g_tau + (g_left - g_tau) * ((eta - x_tau) / eta) ** 2
+                g_tau = g_right + (g_left - g_right) * ((eta - x_tau) / eta) ** 2
             if eta <= x_tau < 1:
-                g_tau = g_tau
+                g_tau = g_right
         #Region IV) g_i-1 >= 0, g_i >= 0 and g_i-1 <= 0, g_i <= 0
-        elif (g_left >= 0 and g_tau >= 0) and (g_left <= 0 and g_tau <= 0):
+        elif (g_left >= 0 and g_right >= 0) or (g_left <= 0 and g_right <= 0):
             region = 'IV'
-            eta = g_tau / (g_tau + g_left)                                                  #Hagan West eq 55
-            A = (g_left * g_tau)/(g_left + g_tau)                                           #Hagan West eq 56
+
+            eta = g_right / (g_right + g_left)                                                  #Hagan West eq 55
+            A = (g_left * g_right)/(g_left + g_right)                                           #Hagan West eq 56
             if 0 < x_tau < eta:
                 g_tau = A + (g_left - A) * ((eta - x_tau) / eta) ** 2                       #Hagan West eq 53
             elif x_tau == eta:
@@ -137,8 +162,6 @@ class Montone_Convex:
                 g_tau = A + (g_left - A) * ((x_tau - eta) / (1-eta)) ** 2
         return region, g_tau
 
-    def positivity(self):
-        region, g_tau = self.monotonicity()
 
 def main():
     # date = input("Enter date (%M-%d-YYYY): ")
@@ -151,7 +174,8 @@ def main():
     test.discrete_fwd
     test.continuous_fwd_midpoints
     test.boundary_conditions
-    test.interpolate(target)
+    test.f_midpoint
+    test.instantaneous_fwd(target,True)
     #test.monotonicity()
 
     import pprint
