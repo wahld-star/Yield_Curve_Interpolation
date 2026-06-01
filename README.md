@@ -12,7 +12,12 @@ The following are currently completed:
 - US Treasury XML feed pull 
 - Straight Line Interpolation
 - Cubic Spline Interpolation
+- Monotone Convex Interpolation with positivity enforcement (amelioration WIP)
 
+## Upcoming Features:
+- Amelioration optionality (<1 week)
+- interfaced yield_curve builder (~ 1 week)
+- Swap builder (~ 2-3 weeks)
 
 
 ## optionality: 
