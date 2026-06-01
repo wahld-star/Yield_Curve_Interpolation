@@ -160,7 +160,7 @@ class Montone_Convex:
                     f[i] = gap_hi
 
         # Remove false values
-        fd_0 = fd[0]                                                   #placeholder value for eq 79
+        fd_0 = fd[0]                                                   #placeholder value for eq 79* FIX THIS BUG
 
         f = f[1:-1]
         fd = fd[1:-1]
@@ -188,8 +188,10 @@ class Montone_Convex:
 
         # Find the interval in which tau falls in
         i = bisect_right(period, tgt)
+        if i == len(period):
+            i = len(period) - 1
 
-        tau_prev = period[i-1]                                   #start of interval
+        tau_prev = 0.0 if i == 0 else period[i-1]                                   #start of interval
         tau_next = period[i]                                     #end of interval
 
         f_disc = list(self.discrete_fwd.values())[i]            #f^d on t_i-1, t_i
@@ -208,24 +210,25 @@ class Montone_Convex:
         g_left = f_mid_left - f_disc
         g_right = f_mid_right - f_disc
         g_vars = [g_tau, g_left, g_right]
+        intervals = [tau_prev, tau_next]
 
-        return f_tau, x_tau, g_vars
+        return f_tau, x_tau, g_vars, intervals
 
 
     def monotonicity(self, tgt = None, positivity = None, amelioration = None):
         #Unpack vars
-        f_tau, x_tau, g_vars = self.instantaneous_fwd(tgt, positivity, amelioration)
+        f_tau, x_tau, g_vars, intervals = self.instantaneous_fwd(tgt, positivity, amelioration)
         g_tau = g_vars[0]
         g_left = g_vars[1]
         g_right = g_vars[2]
 
         #Define our regions
         #Region I) g_i-1 > 0, -.5g_i-1 >= >= gi >= -2g_i-1 and g_i-1 < 0, .5g_i-1 <= g_i <= -2g-1
-        if (g_left > 0 and .5 * g_left >= g_right >= -2*g_left) or (g_left < 0 and .5 * g_left <= g_right <= -2*g_left):
+        if (g_left > 0 and -.5 * g_left >= g_right >= -2*g_left) or (g_left < 0 and -.5 * g_left <= g_right <= -2*g_left):
             region = 'I'
             pass    #no change needed
         #Region II) g_i-1 < 0, -2g_i-1 and g_i-1 > 0, g_i < -2g_i-1
-        elif (g_left < 0 and g_right > -2 * g_left) or (g_left > 0 and g_right < -2*g_left):
+        elif (g_left < 0 and g_right > -2 * g_left) or (g_left > 0 and g_right < -2 * g_left):
             region = 'II'
             eta = (g_right + 2*g_left)/(g_right - g_left)                                       #Hagan West eq 50
             if 0 <= x_tau <= eta:
@@ -233,7 +236,7 @@ class Montone_Convex:
             elif eta < x_tau <= 1:
                 g_tau = g_left + (g_right - g_left) * ((x_tau - eta) / (1 - eta)) ** 2
         #Region III) g_i-1 > 0, 0 > g_i > .5g_i-1 and g_i-1 < 0, 0 < g_i < .5g_i-1
-        elif (g_left > 0 and 0 > g_right > .5 * g_left) or (g_left < 0 and 0 < g_right < .5 * g_left):
+        elif (g_left > 0 and 0 > g_right > -.5 * g_left) or (g_left < 0 and 0 < g_right < -.5 * g_left):
             region = 'III'
             eta = 3 * (g_right / (g_right - g_left))                                            #Hagan West eq 52
             if 0 < x_tau < eta:
@@ -245,26 +248,96 @@ class Montone_Convex:
             region = 'IV'
 
             eta = g_right / (g_right + g_left)                                                  #Hagan West eq 55
-            A = (g_left * g_right)/(g_left + g_right)                                           #Hagan West eq 56
+            A = -((g_left * g_right)/(g_left + g_right))                                           #Hagan West eq 56
             if 0 < x_tau < eta:
                 g_tau = A + (g_left - A) * ((eta - x_tau) / eta) ** 2                       #Hagan West eq 53
             elif x_tau == eta:
                 g_tau = A
             elif eta < x_tau < 1:
-                g_tau = A + (g_left - A) * ((x_tau - eta) / (1-eta)) ** 2
-        return region, g_tau
+                g_tau = A + (g_right - A) * ((x_tau - eta) / (1-eta)) ** 2
+
+        #Inetentional Break
+        return region, g_tau, intervals, g_left, g_right
 
 
 
-    def recover_zero_rate(self):
+    def recover_zero_rate(self, tgt = None):
+        #Unpack variables passed from mono
+        region, g_tau, intervals, g_left, g_right = self.monotonicity(tgt = tgt, positivity = True, amelioration = False)
+        tau_left, tau_right = intervals[0], intervals[1]
+        x_tau = ((tgt - tau_left) / (tau_right - tau_left))
 
+        # Using our regions from before we will integrate back to the zero rates
+        if region == 'I':
+            interval_width = tau_right - tau_left
+            I_t = interval_width * ((g_left * (x_tau - 2 * x_tau **2 + x_tau ** 3)) + g_right * (-x_tau **2 + x_tau ** 3))
+        elif region == 'II':
+            interval_width = tau_right - tau_left
+            eta = (g_right + 2*g_left)/(g_right - g_left)
+            if 0 <= x_tau <= eta: #Case 1
+                I_t = interval_width * (g_left * x_tau)
+            elif eta < x_tau <= 1:  #Case 2
+                I_t = interval_width * (g_left * x_tau + (((g_right - g_left) * (x_tau - eta)**3) / (3 * ( 1- eta)**2)))
+        elif region == 'III':
+            eta = 3 * (g_right / (g_right - g_left))
+            interval_width = tau_right - tau_left
+            if 0 <= x_tau <= eta:
+                I_t = interval_width * (g_right * x_tau + (g_left - g_right) * ((eta**3 - (eta - x_tau)**3) / (3 * eta**2)))
+            elif eta < x_tau <= 1:
+                I_t = interval_width * (g_right * x_tau + (g_left - g_right ) *eta / 3)
+        elif region == 'IV':
+
+            #introduce bounds?????? look at old notes *****
+
+            interval_width = tau_right - tau_left
+            eta = g_right / (g_right + g_left)
+            A = - ((g_left * g_right) / (g_left + g_right))
+            if 0 <= x_tau <= eta:
+                I_t = interval_width * (A*x_tau + ((g_left - A) * ((eta ** 3 - (eta - x_tau)**3) / (3*eta**2))))
+            elif eta < x_tau <= 1:
+                I_t = interval_width * (A*x_tau + ((g_left - A) * eta) / 3 + (g_right - A) * ((x_tau - eta) ** 3 / (3 * (1-eta) **2)))
+        else:
+            print(f'Error, unknown region {region}')
+
+
+
+        return I_t
+
+    def zero_rate(self, tgt = None):
+        I_t = self.recover_zero_rate(tgt = tgt)                                 #I_t
+        period = self.maturity_floats
+        i = bisect_right(period, tgt)
+        if i == len(period):
+            i = len(period) - 1
+        tau_prev = 0.0 if i == 0 else period[i-1]                                                  #t_i-1
+        f_disc = list(self.discrete_fwd.values())[i]                            #fd_i connecting t_i-1 and t_i
+
+        r_prev_tau_prev = 0.0 if i == 0 else self.input_rates[i-1] * tau_prev
+
+        r_t = (1/tgt) * (r_prev_tau_prev + f_disc * (tgt - tau_prev) + I_t)
+
+        return r_t
+
+    def plot_curve(self):
+        grid = np.linspace(self.maturity_floats[0], self.maturity_floats[-1], 100)
+        zero_rates = [self.zero_rate(t) for t in grid]
+
+        plt.figure(figsize = (12,6))
+        plt.plot(grid, zero_rates, label='Zero Curve', color='#98002E')
+        plt.scatter(self.maturity_floats, self.input_rates, color='#BC9B6A', label='Input Rates')
+        plt.xlabel('Maturity (Years)')
+        plt.ylabel('Rate (%)')
+        plt.title('Montone Convex Curve')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
 
 def main():
     # date = input("Enter date (%M-%d-YYYY): ")
     # target = float(input('Select maturity period in years: '))
     date = "04-01-2026"
-    target = 4
+    target = .5
     data = Treasury_Data(date=date)
     test = Montone_Convex(data)
     # Trigger the computations
@@ -272,9 +345,10 @@ def main():
     test.continuous_fwd_midpoints
     test.boundary_conditions
     test.f_midpoint
-    test.instantaneous_fwd(target,0, 0)
-    test.monotonicity(target,0, 1)
-    #test.monotonicity()
+    test.instantaneous_fwd(target,1, 0)
+    test.zero_rate(target)
+    test.plot_curve()
+
 
     import pprint
     pprint.pprint(vars(test))

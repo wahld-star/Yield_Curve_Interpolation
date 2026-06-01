@@ -15,16 +15,16 @@ class Cubic_Spline:
 
 
     def cubic_spline(self, target):
-        curve_points = self.input_rates
-        maturites = self.maturity_floats
+        curve_points = [.0397, .0415, .0433]
+        maturites = [5, 7, 10]
         #fit using sci_py cubic_spline function
         cs_fit = csp.CubicSpline(maturites, curve_points)
 
-        x_smooth = np.linspace(self.maturity_floats[0], self.maturity_floats[-1],300)
+        x_smooth = np.linspace(maturites[0], maturites[-1],200)
         y_smooth = cs_fit(x_smooth)
 
 
-
+        #matplot lib is for the robot
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.plot(
             x_smooth,
@@ -34,7 +34,7 @@ class Cubic_Spline:
             label="Yield Curve (cubic spline)",
         )
         ax.scatter(
-            self.maturity_floats,
+            maturites,
             curve_points,
             color="#98002E",
             zorder=3,
@@ -63,7 +63,7 @@ def main():
     # date = input("Enter date (%M-%d-YYYY): ")
     # target = float(input('Select maturity period in years: '))
     date = "04-01-2026"
-    target = 6
+    target = -1
     data = Treasury_Data(date=date)
     test = Cubic_Spline(data)
     test.cubic_spline(target)
