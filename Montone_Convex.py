@@ -5,11 +5,14 @@ from functools import cached_property
 from bisect import bisect_right
 
 class Montone_Convex:
-    def __init__(self, t_data):
+    def __init__(self, t_data, amel = False, lam = 0.20, positivity = True):
         self.maturity_map = t_data.maturity_map
         self.maturity_labels = t_data.maturity_labels #replacing maturities
         self.maturity_floats = t_data.maturity_floats #replacing maturity_numerical
         self.input_rates = t_data.input_rates #Anchor Rates
+        self.amel = amel                                    #amelioration of the curve?
+        self.lam = lam
+        self.positive = positivity
 
     #Create discrete fwd arb-free rates
     @cached_property
@@ -61,88 +64,71 @@ class Montone_Convex:
     @cached_property
     def f_midpoint(self):
         f0, fn = self.boundary_conditions
-        anchor_midpoints = self.continuous_fwd_midpoints
+        anchor_midpoints = list(self.continuous_fwd_midpoints)
         anchor_midpoints.insert(0, f0)
         anchor_midpoints.append(fn)
         return anchor_midpoints
 
-    @cached_property
-    def positivity_bound(self):
-        f = list(self.f_midpoint)
-        fd = list(self.discrete_fwd.values())
-        n = len(fd)
-
-        #cap f0 by interval 1's average
-        f[0] = min(max(0.0, f[0]), 2*fd[0])                 #Hagan West eq 60
-
-        #interior f_i is bounded by the stricter of the two adjacent intervals
-        for i in range(1, n):
-            cap = 2*min(fd[i-1], fd[i])
-            f[i] = min(max(0.0, f[i]), cap)                 #Hagan West eq 61
-
-        #cap fn by last intervals average
-        f[n] = min(max(0.0, f[n]), 2 * fd[-1])
-        anchor_midpoints_bounded = f
-        return anchor_midpoints_bounded
 
     @cached_property
-    def amelioration(self, lam = 0.2):
+    def amelioration(self):
         #smoothness at the expense of locality
-        lam = lam
-        period = list(self.maturity_floats)
-        fd = list(self.discrete_fwd.values())
+        lam = self.lam
+        period = [0.0] + list(self.maturity_floats)                 #add an extra input for calculating our first actual point aka 1 month
+        fd = list(self.discrete_fwd.values())                       #f_d1 - f_dn
+        n = len(fd)                                                 #why python start at 0  >:(
 
-        #a) create new interval
+        #a) create new false intervals at each end
         new_start = period[0] - (period[1] - period[0])             #Equation 72 in Hagan West
         fd_0 = fd[0] - ((period[1] - period[0]) / (period[2] - period[0])) * (fd[1] - fd[0])
         new_end = period[-1] + (period[-1] - period[-2])            #Equation 73 in Hagan West
         fd_n1 = fd[-1] + ((period[-1] - period[-2]) / (period[-1] - period[-3])) * (fd[-1] - fd[-2])
-        #Add interval to list
-        period.insert(0, new_start)
-        period.append(new_end)
-        fd.insert(0, fd_0)
-        fd.append(fd_n1)
-        f = [0.0] * len(period)                                     #create empty f list
+        #Add new intervals to our list
+        tau_new = [new_start] + period + [new_end]
+        fd_new = [fd_0] + fd + [fd_n1]
 
-        for i in range(1, len(period) - 1):
+        #b) select midpoint forwards
+        f = [0.0] * (n + 1)  # create empty f list
+        for i in range(1, n+1):
             #Equation 74
-            f[i] = (period[i] - period[i - 1]) / (period[i + 1] - period[i - 1]) * fd[i + 1] + (period[i+1] - period[i]) / (period[i + 1] - period[i - 1]) * fd[i]
+            f[i] = (tau_new[i+1] - tau_new[i]) / (tau_new[i + 2] - tau_new[i]) * fd_new[i + 1] + (tau_new[i+2] - tau_new[i+1]) / (tau_new[i + 2] - tau_new[i]) * fd_new[i]
 
-        for i in range(2, len(period) - 2):
+        #c) clamp interior knots to bounded amelioration adjustment range
+        for i in range(1, n):
             #equation 68
-            theta_minus = (period[i] - period[i - 1]) / (period[i] - period[i - 2]) * (fd[i] - fd[i-1])
+            theta_minus = (tau_new[i+1] - tau_new[i]) / (tau_new[i+1] - tau_new[i - 1]) * (fd_new[i] - fd_new[i-1])
             # equation 67, previous interval
-            if fd[i-1] < fd[i] <= fd[i+1]:
-                f_min1 = min(fd[i] + .5 * theta_minus, fd[i +1])
-                f_max1 = min(fd[i] + 2 * theta_minus, fd[i+1])
+            if fd_new[i-1] < fd_new[i] <= fd_new[i+1]:
+                f_min1 = min(fd_new[i] + .5 * theta_minus, fd_new[i +1])
+                f_max1 = min(fd_new[i] + 2 * theta_minus, fd_new[i+1])
 
-            elif fd[i-1] < fd[i] and fd[i] > fd[i+1]:
-                f_min1 = max(fd[i] - .5 * lam * theta_minus, fd[i+1])
-                f_max1 = fd[i]
+            elif fd_new[i-1] < fd_new[i] and fd_new[i] > fd_new[i+1]:
+                f_min1 = max(fd_new[i] - .5 * lam * theta_minus, fd_new[i+1])
+                f_max1 = fd_new[i]
 
-            elif fd[i-1] >= fd[i] and fd[i] <= fd[i+1]:
-                f_min1 = fd[i]
-                f_max1 = min(fd[i] - .5 * lam * theta_minus, fd[i+1])
+            elif fd_new[i-1] >= fd_new[i] and fd_new[i] <= fd_new[i+1]:
+                f_min1 = fd_new[i]
+                f_max1 = min(fd_new[i] - .5 * lam * theta_minus, fd_new[i+1])
 
-            elif fd[i-1] >= fd[i] > fd[i+1]:
-                f_min1 = max(fd[i] + 2 * theta_minus, fd[i+1])
-                f_max1 = max(fd[i] + .5 * theta_minus, fd[i+1])
+            elif fd_new[i-1] >= fd_new[i] > fd_new[i+1]:
+                f_min1 = max(fd_new[i] + 2 * theta_minus, fd_new[i+1])
+                f_max1 = max(fd_new[i] + .5 * theta_minus, fd_new[i+1])
 
             #equation 71
-            theta_plus = ((period[i+1] - period[i]) / (period[i+2] - period[i])) * (fd[i+2] - fd[i+1])
+            theta_plus = ((tau_new[i+2] - tau_new[i+1]) / (tau_new[i+3] - tau_new[i+1])) * (fd_new[i+2] - fd_new[i+1])
             #equation 70, next interval
-            if fd[i] < fd[i+1] <= fd[i+2]:
-                f_min2 = max(fd[i+1] - 2 * theta_plus, fd[i])
-                f_max2 = max(fd[i+1] - .5*theta_plus, fd[i])
-            elif fd[i] < fd[i+1] and fd[i+1] > fd[i+2]:
-                f_min2 = max(fd[i+1] + .5 * lam * theta_plus, fd[i])
-                f_max2 = fd[i+1]
-            elif fd[i] >= fd[i+1] and fd[i+1] < fd[i+2]:
-                f_min2 = fd[i+1]
-                f_max2 = min(fd[i+1] + .5 * lam * theta_plus, fd[i])
-            elif fd[i] >= fd[i+1] >= fd[i+2]:
-                f_min2 = min(fd[i+1] - .5 * theta_plus, fd[i])
-                f_max2 = min(fd[i+1] - 2 * theta_plus, fd[i])
+            if fd_new[i] < fd_new[i+1] <= fd_new[i+2]:
+                f_min2 = max(fd_new[i+1] - 2 * theta_plus, fd_new[i])
+                f_max2 = max(fd_new[i+1] - .5*theta_plus, fd_new[i])
+            elif fd_new[i] < fd_new[i+1] and fd_new[i+1] > fd_new[i+2]:
+                f_min2 = max(fd_new[i+1] + .5 * lam * theta_plus, fd_new[i])
+                f_max2 = fd_new[i+1]
+            elif fd_new[i] >= fd_new[i+1] and fd_new[i+1] < fd_new[i+2]:
+                f_min2 = fd_new[i+1]
+                f_max2 = min(fd_new[i+1] + .5 * lam * theta_plus, fd_new[i])
+            elif fd_new[i] >= fd_new[i+1] >= fd_new[i+2]:
+                f_min2 = min(fd_new[i+1] - .5 * theta_plus, fd_new[i])
+                f_max2 = min(fd_new[i+1] - 2 * theta_plus, fd_new[i])
 
             #setting f
             #target ranges overlap
@@ -159,29 +145,41 @@ class Montone_Convex:
                 elif f[i] > gap_hi:
                     f[i] = gap_hi
 
-        # Remove false values
-        fd_0 = fd[0]                                                   #placeholder value for eq 79* FIX THIS BUG
-
-        f = f[1:-1]
-        fd = fd[1:-1]
-        #Replace f0 and fn
-        if abs(f[0] - fd_0) > 0.5 * abs(f[1] - fd_0):
-            f[0] = fd[0] - 0.5 * (f[1] - fd_0)                         #Eq 79
-        if abs(f[-1] - fd[-1]) > 0.5 * abs(f[-2] - fd[-1]):
-            f[-1] = fd[-1] + 0.5 * (fd[-1] - f[-2])                     #Eq 80
-
-        f0_am = fd[0] - 0.5 * (f[0] - fd[0])                            #add back f0
-        f = [f0_am] + f
+        #d/e conditional boundry replacement, f0 fn
+        if abs(f[0] - fd_new[0]) > 0.5 * abs(f[1] - fd_new[0]):
+            f[0] = fd_new[1] - 0.5 * (f[1] - fd_new[0])                         #Eq 79
+        if abs(f[n] - fd_new[n]) > 0.5 * abs(f[n-1] - fd_new[n]):
+            f[n] = fd_new[n] + 0.5 * (fd_new[n] - f[n-1])                       #Eq 80
 
         return f
 
-    def instantaneous_fwd(self, tgt = None, positivity = None, amelioration = None):
+    @cached_property
+    def positivity_bound(self, amel = 0):
+        if self.amel == 1:
+            f = self.amelioration
+        else:
+            f = list(self.f_midpoint)
+        fd = list(self.discrete_fwd.values())
+        n = len(fd)
+
+        #cap f0 by interval 1's average
+        f[0] = min(max(0.0, f[0]), 2*fd[0])                 #Hagan West eq 60
+
+        #interior f_i is bounded by the stricter of the two adjacent intervals
+        for i in range(1, n):
+            cap = 2*min(fd[i-1], fd[i])
+            f[i] = min(max(0.0, f[i]), cap)                 #Hagan West eq 61
+
+        #cap fn by last intervals average
+        f[n] = min(max(0.0, f[n]), 2 * fd[-1])
+        anchor_midpoints_bounded = f
+        return anchor_midpoints_bounded
+
+    def instantaneous_fwd(self, tgt = None):
     #Define our quadratic as K + Lx(tau) _ Mx(tau)^2
     #interpolate at a single point (tau)
-        if positivity == 1:
+        if self.positive == 1:
             anchor_points = self.positivity_bound
-        elif amelioration == 1:
-            anchor_points = self.amelioration
         else:
             anchor_points = self.f_midpoint
         period = self.maturity_floats
@@ -215,9 +213,9 @@ class Montone_Convex:
         return f_tau, x_tau, g_vars, intervals
 
 
-    def monotonicity(self, tgt = None, positivity = None, amelioration = None):
+    def monotonicity(self, tgt = None):
         #Unpack vars
-        f_tau, x_tau, g_vars, intervals = self.instantaneous_fwd(tgt, positivity, amelioration)
+        f_tau, x_tau, g_vars, intervals = self.instantaneous_fwd(tgt)
         g_tau = g_vars[0]
         g_left = g_vars[1]
         g_right = g_vars[2]
@@ -263,7 +261,7 @@ class Montone_Convex:
 
     def recover_zero_rate(self, tgt = None):
         #Unpack variables passed from mono
-        region, g_tau, intervals, g_left, g_right = self.monotonicity(tgt = tgt, positivity = True, amelioration = False)
+        region, g_tau, intervals, g_left, g_right = self.monotonicity(tgt = tgt)
         tau_left, tau_right = intervals[0], intervals[1]
         x_tau = ((tgt - tau_left) / (tau_right - tau_left))
 
@@ -336,16 +334,16 @@ class Montone_Convex:
 def main():
     # date = input("Enter date (%M-%d-YYYY): ")
     # target = float(input('Select maturity period in years: '))
-    date = "04-01-2026"
-    target = .5
+    date = "04-01-2003"
+    target = 6
     data = Treasury_Data(date=date)
-    test = Montone_Convex(data)
+    test = Montone_Convex(data,0,1)
     # Trigger the computations
     test.discrete_fwd
     test.continuous_fwd_midpoints
     test.boundary_conditions
     test.f_midpoint
-    test.instantaneous_fwd(target,1, 0)
+    test.instantaneous_fwd(target)
     test.zero_rate(target)
     test.plot_curve()
 
