@@ -1,11 +1,9 @@
 import tkinter as tk
 from tkinter import ttk
 import datetime as dt
-
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-
 from ust_xml_pull import Treasury_Data
 from straight_line import Straight_Line
 from Cubic_Spline import Cubic_Spline
@@ -16,7 +14,6 @@ METHODS = {
     "Cubic Spline":    Cubic_Spline,
     "Monotone Convex": Montone_Convex,
 }
-
 
 class Curve_Builder:
     def __init__(self):
@@ -39,23 +36,29 @@ class Curve_Builder:
         self.date_entry.insert(0, today)
         self.date_entry.grid(row=0, column=1, padx=5)
 
-        # method (values come straight from the dispatch table)
+        #select method controls
         tk.Label(controls, text="Method:").grid(row=0, column=2, padx=5)
         self.method_box = ttk.Combobox(controls, values=list(METHODS), state="readonly")
         self.method_box.set("Monotone Convex")
         self.method_box.grid(row=0, column=3, padx=5)
+        #select target contorl
+        tk.Label(controls, text="Target Maturity: ").grid(row=1, column=2, padx=5)
+        self.target_entry = tk.Entry(controls)
+        self.target_entry.insert(0,6)
+        self.target_entry.grid(row=1, column=3, padx=5)
 
+        #select lambda controls
         tk.Label(controls, text='Lambda:').grid(row=0, column=4, padx=5)
         self.lambda_select = tk.Entry(controls)
         self.lambda_select.insert(0, 0.2)
         self.lambda_select.grid(row=0, column=5, padx=5)
-
+        #Positivity enforment control
         tk.Label(controls, text="Positivity:").grid(row=1, column=4, padx=5)
         self.positive_select = ttk.Combobox(controls, values=('True', 'False'), state="readonly")
         self.positive_select.insert(0, 'True')
         self.positive_select.grid(row=1, column=5, padx=5)
 
-        # build button
+        #Graph chart button
         tk.Button(controls, text="Build Curve", command=self.build_curve).grid(row=1, column=0, padx=5)
 
         # status line (shows errors instead of crashing)
@@ -73,18 +76,27 @@ class Curve_Builder:
     def get_curve(self, data, method):
         mats = data.maturity_floats
         grid = np.linspace(mats[0], mats[-1], 200)
+        if method == "Straight Line":
 
-        builder = METHODS[method](data)  # instantiate the chosen class
-        curve = [builder.zero_rate(t) for t in grid]
+        elif method == "Cubic Spline":
+
+        elif method == "Monotone Convex":
+
+    
+
+
+
+
+
         return grid, curve
-
+    """
     def build_curve(self):
         date = self.date_entry.get().strip()
         method = self.method_box.get()
         self.status.config(text="")
 
         try:
-            data = Treasury_Data(date=date)  # pulls from the treasury feed
+            data = Treasury_Data(date=date)             #Retrieve input rates from UST xml feed
             grid, curve = self.get_curve(data, method)
         except Exception as e:
             self.status.config(text=f"Error: {e}")

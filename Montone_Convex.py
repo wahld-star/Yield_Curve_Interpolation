@@ -253,11 +253,7 @@ class Montone_Convex:
                 g_tau = A
             elif eta < x_tau < 1:
                 g_tau = A + (g_right - A) * ((x_tau - eta) / (1-eta)) ** 2
-
-        #Inetentional Break
         return region, g_tau, intervals, g_left, g_right
-
-
 
     def recover_zero_rate(self, tgt = None):
         #Unpack variables passed from mono
@@ -334,10 +330,10 @@ class Montone_Convex:
 def main():
     # date = input("Enter date (%M-%d-YYYY): ")
     # target = float(input('Select maturity period in years: '))
-    date = "04-01-2003"
+    date = "04-01-2014"
     target = 6
     data = Treasury_Data(date=date)
-    test = Montone_Convex(data,0,1)
+    test = Montone_Convex(data,1,.5, 1)
     # Trigger the computations
     test.discrete_fwd
     test.continuous_fwd_midpoints

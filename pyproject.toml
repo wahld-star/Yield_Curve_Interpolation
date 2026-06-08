@@ -8,6 +8,8 @@ dependencies = [
     'datetime',
     'requests',
     'lxml',
-    "numpy",
+    'numpy',
     'matplotlib',
+    'scipy'
+
 ]
