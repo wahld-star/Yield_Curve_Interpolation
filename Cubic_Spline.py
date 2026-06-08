@@ -15,12 +15,12 @@ class Cubic_Spline:
 
 
     def cubic_spline(self, target):
-        curve_points = [.0397, .0415, .0433]
-        maturites = [5, 7, 10]
+        curve_points = self.input_rates
+        maturites = self.maturity_floats
         #fit using sci_py cubic_spline function
         cs_fit = csp.CubicSpline(maturites, curve_points)
 
-        x_smooth = np.linspace(maturites[0], maturites[-1],200)
+        x_smooth = np.linspace(self.maturity_floats[0], self.maturity_floats[-1],300)
         y_smooth = cs_fit(x_smooth)
 
 
