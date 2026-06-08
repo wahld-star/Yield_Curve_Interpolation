@@ -9,7 +9,7 @@ class Straight_Line:
         self.maturity_map = t_data.maturity_map
         self.maturity_labels = t_data.maturity_labels
         self.maturity_floats = t_data.maturity_floats
-        self.anchor_rts = t_data.anchor_rates
+        self.anchor_rts = t_data.input_rates
 
     def straight_line_interp(self, tgt_rt: float, date: str):
         """
@@ -23,7 +23,7 @@ class Straight_Line:
             )
 
         # Retrieve Rates
-        anchor_rts = self.anchor_rts
+        anchor_rts = self.input_rates
 
         # Interpolater
         rt_anchor_mat = np.searchsorted(self.maturity_floats, tgt_rt, side="right")
