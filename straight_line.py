@@ -9,25 +9,16 @@ class Straight_Line:
         self.maturity_map = t_data.maturity_map
         self.maturity_labels = t_data.maturity_labels
         self.maturity_floats = t_data.maturity_floats
-        self.anchor_rts = t_data.input_rates
+        self.input_rates = t_data.input_rates
 
-    def straight_line_interp(self, tgt_rt: float, date: str):
-        """
-        #param date: %M-%d-YYYY
-        #param T: target maturity in years
-        """
-
-        if tgt_rt < self.maturity_floats[0] or tgt_rt > self.maturity_floats[-1]:
-            raise ValueError(
-                f"Target {tgt_rt} outside range [{self.maturity_floats[0]}, {self.maturity_floats[-1]}]"
-            )
+    def zero_rate(self, tgt_rt=None):
 
         # Retrieve Rates
         anchor_rts = self.input_rates
 
         # Interpolater
         rt_anchor_mat = np.searchsorted(self.maturity_floats, tgt_rt, side="right")
-        interval = max(rt_anchor_mat, 1)
+        interval = min(max(rt_anchor_mat, 1), len(self.maturity_floats) - 1) #clamp to final interval
 
         time_low, time_high = (
             self.maturity_floats[interval - 1],
@@ -39,51 +30,6 @@ class Straight_Line:
         weight_low = (time_high - tgt_rt) / interval_width
         weight_high = (tgt_rt - time_low) / interval_width
 
-        interp_rt = rate_low * weight_low + rate_high * weight_high
+        r_t = rate_low * weight_low + rate_high * weight_high
 
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(
-            self.maturity_floats,
-            anchor_rts,
-            color="#98002E",
-            linewidth=1.5,
-            label="Yield Curve (linear interp)",
-        )
-        ax.scatter(
-            self.maturity_floats,
-            anchor_rts,
-            color="#98002E",
-            zorder=3,
-            label="Known tenors",
-        )
-        ax.scatter(
-            tgt_rt,
-            interp_rt,
-            color="#BC9B6A",
-            zorder=5,
-            s=80,
-            label=f"Interpolated ({tgt_rt:.4f}Y → {interp_rt:.4f}%)",
-        )
-        ax.set_xlabel("Maturity (years)")
-        ax.set_ylabel("Yield (%)")
-        ax.set_title(f"US Treasury Yield Curve — Straight Line Interpolation ({date})")
-        ax.legend()
-        ax.grid(True, linestyle="--", alpha=0.4)
-        plt.tight_layout()
-        plt.show()
-
-        return interp_rt
-
-
-def main():
-    # date = input("Enter date (%M-%d-YYYY): ")
-    # target = float(input('Select maturity period in years: '))
-    date = "04-01-2026"
-    target = 6
-    data = Treasury_Data(date=date)
-    interp = Straight_Line(t_data=data)
-    interp.straight_line_interp(tgt_rt=target, date=date)
-
-
-if __name__ == "__main__":
-    main()
+        return r_t
