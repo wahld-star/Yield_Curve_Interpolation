@@ -15,17 +15,18 @@ The following are currently completed:
 - Monotone Convex Interpolation with positivity enforcement
 
 ## Upcoming Features:
-- Swap builder (~ 1-2 weeks)
-- 
+- Swap builder (~1-2 weeks)
+- Custom Input Curve Builder (~2-3 weeks)
 
-
-## optionality: 
-    - positivty? default to yes
-    - amelioration? default to no 
-        - Set lambda; default to .20
-    - Rates to pull??? *may exclude*
-    - target rate
-    - number of points; default to 1000
+## Features: 
+- Interpolation Method Selection
+- Select Historical Date via UST daily par curve rates
+- Enforce positivty; default to yes
+- Amelioration
+    - Set lambda; default to .20
+- Target Rate
+- Historical Curve Comparison
+- Export to jpeg
 
 ## Known Bugs:
     - Error handling dates
