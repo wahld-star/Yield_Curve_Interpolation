@@ -15,9 +15,8 @@ The following are currently completed:
 - Monotone Convex Interpolation with positivity enforcement
 
 ## Upcoming Features:
-- Interfaced curve builder
-- interfaced yield_curve builder (~ 1 week)
-- Swap builder (~ 2-3 weeks)
+- Swap builder (~ 1-2 weeks)
+- 
 
 
 ## optionality: 
@@ -27,3 +26,7 @@ The following are currently completed:
     - Rates to pull??? *may exclude*
     - target rate
     - number of points; default to 1000
+
+## Known Bugs:
+    - Error handling dates
+    - Using a different method to chart a second curve
