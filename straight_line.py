@@ -1,8 +1,4 @@
-import matplotlib.pyplot as plt
 import numpy as np
-
-from ust_xml_pull import Treasury_Data
-
 
 class Straight_Line:
     def __init__(self, t_data):
